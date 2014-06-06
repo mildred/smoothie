@@ -50,6 +50,10 @@ var paths = window.Smoothie&&window.Smoothie.paths!==undefined?window.Smoothie.p
 
 var pwd = Array('');
 
+// INFO Pending callbacks
+
+var callbackstack = {};
+
 // INFO Path parser
 //      A HTMLAnchorElement parses its href property automatically, so we use
 //      this functionality to parse our module paths instead of implemnting our
@@ -81,6 +85,42 @@ var locks = new Object();
 //      module has been loaded.
 
 function require(identifier, callback) {
+/*
+  var frame = callbackstack.last_frame;
+  if(frame) {
+    frame.numrequires++;
+    return require(identifier, function(){
+      if(callbackstack.last_frame) console.error(callbackstack); // should not have a last_frame
+      callbackstack.last_frame = frame;
+      var res = callback.apply(this, arguments);
+      callbackstack.last_frame = undefined;
+      frame.on_load();
+      return res;
+    });
+  }
+*/
+/*
+  var pending_callbacks = callbackstack.stack;
+  callbackstack.stack = [];
+  // When require inside require, don't run callbacks just now, but store them
+  // away in a local variable and execute the pending callbacks when the
+  // sub-require call completes
+  if(pending_callbacks.length > 0) {
+    callbackstack.numrequire++;
+    
+    var callback_store = {};
+    callbackstack.last_require = callback_store;
+    return require(mod, function(){
+	    var res = callback.apply(this, arguments);
+      var s = [];
+      s.push.apply(s, callbackstack.stack);
+      s.push.apply(s, pending_callbacks);
+      callbackstack.stack = s;
+      return res;
+	  });
+  }
+*/
+  // When require multiple modules
   if(identifier instanceof Array) {
     var modules = [];
     var modules_left = identifier.length;
@@ -97,15 +137,18 @@ function require(identifier, callback) {
     }
     return modules;
   }
-
+  
+  var frame = callbackstack.last_frame;
+  if(frame) frame.on_require();
+  
 	var descriptor = resolve(identifier);
 	var cacheid = '$'+descriptor.id;
-	descriptor._callback = callback;
-	descriptor._require  = require;
+	//descriptor._callback = callback;
+	//descriptor._require  = require;
 
 	if (cache[cacheid]) {
-		if (typeof cache[cacheid] === 'string')
-			load(descriptor, cache, pwd, cache[cacheid]);
+		if (typeof cache[cacheid] === 'function' || typeof cache[cacheid] === 'string')
+			load(descriptor, cache, pwd, cache[cacheid], callback, callbackstack, frame);
 		// NOTE The callback should always be called asynchronously to ensure
 		//      that a cached call won't differ from an uncached one.
 		return cache[cacheid];
@@ -142,7 +185,7 @@ function require(identifier, callback) {
 			return;
 		}
 		if (!cache[cacheid]) {
-			load(descriptor, cache, pwd, 'function(){\n'+request.responseText+'\n}');
+			load(descriptor, cache, pwd, request.responseText, callback, callbackstack, frame);
 		}
 	}
 }
@@ -200,6 +243,10 @@ for (var i=0; i<paths.length; i++) {
 	paths[i] = '/'+parser.href.replace(/^[^:]*:\/\/[^\/]*\/|\/(?=\/)/g, '');
 }
 
+// INFO Make cache available outside
+
+require.cache = cache;
+
 })(
 
 // INFO Module loader
@@ -212,14 +259,108 @@ for (var i=0; i<paths.length; i++) {
 //      global variables, module and exports) for the loaded module. This is
 //      also the reason why `source`, `pwd` & `cache` are not named parameters.
 
-function /*load*/(module/*, cache, pwd, source*/) {
+
+function load(module, cache, pwd, source, callback, callbackstack, parent_frame) {
 	var global = window;
 	var exports = new Object();
+	
+	Object.defineProperty(module, 'exports', {
+	  'get':function(){ return exports; },
+	  'set':function(e){ exports=e; }
+	});
+	Object.defineProperty(cache, '$'+module.id, {
+	  'get':function(){return exports;}
+	});
+  
+  var frame = {
+	  num_requires: 1,
+	  f: callback,
+	  t: this,
+	  e: exports,
+    on_require: function(){
+	    this.num_requires++;
+    },
+	  on_load: function(){
+	    this.num_requires--;
+	    if(this.num_requires == 0) {
+	      console.log("require.js: " + module.uri + " ready, run direct callback");
+	      this.f.apply(this.t, [this.e]);
+	      if(this.parent) {
+	        console.log("require.js: " + module.uri + " ready, run parent callback");
+	        this.parent.on_load();
+	      }
+	      console.log("require.js: " + module.uri + " callback finished");
+	    }
+	  },
+	  parent: parent_frame
+	}
+	
+	// Add pwd and callback to stack
+	pwd.unshift(module.id.match(/(?:.*\/)?/)[0]);
+	//callbackstack.push({f:callback, t:this, e:exports});
+  var last_frame = callbackstack.last_frame;
+  if(last_frame !== undefined) console.error(callbackstack);
+	callbackstack.last_frame = frame;
+	
+	console.log("require.js: " + module.uri + " loading");
+	
+	if(typeof source === 'string') {
+	  // NOTE Firebug ignores the sourceUrl when the source is composed inside
+	  //      the eval call.
+	  /*
+	  var cacheid = '$' + module.id;
+	  source = 'require.cache[' + JSON.stringify(cacheid) + '] = function(global, module, exports){if(true){' + source + '} return {m:module, e:exports}; };'
+    source += '\n//# sourceURL='+module.uri
+    addCode(source);
+    var res = cache[cacheid](global, module, exports);
+    module = res.m;
+    exports = res.e;
+    */
+    var f = new Function('global', 'module', 'exports', source);
+    source = function(){
+      return f(global, module, exports);
+    }
+    source();
+  } else {
+  	source();
+  }
+	
+	console.log("require.js: " + module.uri + " loaded");
+	
+  // NOTE Store module code in the cache if the loaded file is a bundle
+  // FIXME: module (and exports) can't be modified directly, only changed
+	if (typeof module.id !== 'string')
+		for (id in module)
+			cache['$'+require.resolve(id).id] = module[id];
+  
+  // Remove pwd from stack
+  pwd.shift();
+  
+  callbackstack.last_frame = last_frame;
+  frame.on_load();
+  
+  // Execute all callbacks
+  /*for(var i = 0; i < callbackstack.stack.length; i++){
+    var cb = callbackstack.stack[i];
+    cb.f.apply(cb.t, [cb.e]);
+  }*/
+  
+  //if(callback) callback(exports);
+  
+  function addCode(js, content_type){
+    var e = document.createElement('script');
+    e.type = 'text/javascript';
+    e.src  = 'data:' + (content_type || 'text/javascript') + ','+escape(js);
+    document.body.appendChild(e);
+  }
+}
+/*
+function / *load* /(module/ *, cache, pwd, source* /) {
 	var require = function(mod, cb2){
-	  var cb = module._callback;
+	  var pending_callback = module._callback;
 	  module._callback = undefined;
 	  return module._require(mod, function(){
-	    module._callback = cb;
+	    module._callback = pending_callback;
 	    setTimeout(function(){ module._callback && module._callback(exports); }, 0);
 	    return cb2.apply(this, arguments);
 	  });
@@ -230,17 +371,19 @@ function /*load*/(module/*, cache, pwd, source*/) {
 	});
 	arguments[2].unshift(module.id.match(/(?:.*\/)?/)[0]);
 	Object.defineProperty(arguments[1], '$'+module.id, {'get':function(){return exports;}});
-	// NOTE Firebug ignores the sourceUrl when the source is composed inside
-	//      the eval call.
 	arguments[3] = '('+arguments[3]+')();\n//# sourceURL='+module.uri;
 	eval(arguments[3]);
+	
+	//var f = new Function('global', 'exports', 'require', source);
+	//f.call(this, );
+	
 	// NOTE Store module code in the cache if the loaded file is a bundle
 	if (typeof module.id !== 'string')
 		for (id in module)
-			arguments[1]['$'+require.resolve(id).id] = module[id].toString();
+			arguments[1]['$'+require.resolve(id).id] = module[id];
 	arguments[2].shift();
 	setTimeout(function(){ module._callback && module._callback(exports); }, 0);
 }
-
+*/
 );
 
