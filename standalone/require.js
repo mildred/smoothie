@@ -26,7 +26,7 @@
 // NOTE The load parameter points to the function, which prepares the
 //      environment for each module and runs its code. Scroll down to the end of
 //      the file to see the function definition.
-(function(load) { 'use strict';
+(function() { 'use strict';
 
 var SmoothieError = function(message, fileName, lineNumber) {
 	this.name = "SmoothieError";
@@ -85,41 +85,6 @@ var locks = new Object();
 //      module has been loaded.
 
 function require(identifier, callback) {
-/*
-  var frame = callbackstack.last_frame;
-  if(frame) {
-    frame.numrequires++;
-    return require(identifier, function(){
-      if(callbackstack.last_frame) console.error(callbackstack); // should not have a last_frame
-      callbackstack.last_frame = frame;
-      var res = callback.apply(this, arguments);
-      callbackstack.last_frame = undefined;
-      frame.on_load();
-      return res;
-    });
-  }
-*/
-/*
-  var pending_callbacks = callbackstack.stack;
-  callbackstack.stack = [];
-  // When require inside require, don't run callbacks just now, but store them
-  // away in a local variable and execute the pending callbacks when the
-  // sub-require call completes
-  if(pending_callbacks.length > 0) {
-    callbackstack.numrequire++;
-    
-    var callback_store = {};
-    callbackstack.last_require = callback_store;
-    return require(mod, function(){
-	    var res = callback.apply(this, arguments);
-      var s = [];
-      s.push.apply(s, callbackstack.stack);
-      s.push.apply(s, pending_callbacks);
-      callbackstack.stack = s;
-      return res;
-	  });
-  }
-*/
   // When require multiple modules
   if(identifier instanceof Array) {
     var modules = [];
@@ -143,12 +108,11 @@ function require(identifier, callback) {
   
 	var descriptor = resolve(identifier);
 	var cacheid = '$'+descriptor.id;
-	//descriptor._callback = callback;
-	//descriptor._require  = require;
+
 
 	if (cache[cacheid]) {
 		if (typeof cache[cacheid] === 'function' || typeof cache[cacheid] === 'string')
-			load(descriptor, cache, pwd, cache[cacheid], callback, callbackstack, frame);
+			load(descriptor, cache[cacheid], callback, callbackstack, frame);
 		// NOTE The callback should always be called asynchronously to ensure
 		//      that a cached call won't differ from an uncached one.
 		return cache[cacheid];
@@ -185,7 +149,7 @@ function require(identifier, callback) {
 			return;
 		}
 		if (!cache[cacheid]) {
-			load(descriptor, cache, pwd, request.responseText, callback, callbackstack, frame);
+			load(descriptor, request.responseText, callback, callbackstack, frame);
 		}
 	}
 }
@@ -247,7 +211,6 @@ for (var i=0; i<paths.length; i++) {
 
 require.cache = cache;
 
-})(
 
 // INFO Module loader
 //      Takes the module descriptor, the global variables and the module code,
@@ -260,7 +223,7 @@ require.cache = cache;
 //      also the reason why `source`, `pwd` & `cache` are not named parameters.
 
 
-function load(module, cache, pwd, source, callback, callbackstack, parent_frame) {
+function load(module, source, callback, callbackstack, parent_frame) {
 	var global = window;
 	var exports = new Object();
 	
@@ -296,11 +259,14 @@ function load(module, cache, pwd, source, callback, callbackstack, parent_frame)
 	}
 	
 	// Add pwd and callback to stack
+	
 	pwd.unshift(module.id.match(/(?:.*\/)?/)[0]);
-	//callbackstack.push({f:callback, t:this, e:exports});
+	
   var last_frame = callbackstack.last_frame;
   if(last_frame !== undefined) console.error(callbackstack);
 	callbackstack.last_frame = frame;
+	
+	// Load code
 	
 	console.log("require.js: " + module.uri + " loading");
 	
@@ -336,16 +302,9 @@ function load(module, cache, pwd, source, callback, callbackstack, parent_frame)
   // Remove pwd from stack
   pwd.shift();
   
+  // Unwind stack
   callbackstack.last_frame = last_frame;
   frame.on_load();
-  
-  // Execute all callbacks
-  /*for(var i = 0; i < callbackstack.stack.length; i++){
-    var cb = callbackstack.stack[i];
-    cb.f.apply(cb.t, [cb.e]);
-  }*/
-  
-  //if(callback) callback(exports);
   
   function addCode(js, content_type){
     var e = document.createElement('script');
@@ -354,36 +313,6 @@ function load(module, cache, pwd, source, callback, callbackstack, parent_frame)
     document.body.appendChild(e);
   }
 }
-/*
-function / *load* /(module/ *, cache, pwd, source* /) {
-	var require = function(mod, cb2){
-	  var pending_callback = module._callback;
-	  module._callback = undefined;
-	  return module._require(mod, function(){
-	    module._callback = pending_callback;
-	    setTimeout(function(){ module._callback && module._callback(exports); }, 0);
-	    return cb2.apply(this, arguments);
-	  });
-	}
-	Object.defineProperty(module, 'exports', {
-	  'get':function(){ return exports; },
-	  'set':function(e){ exports=e; }
-	});
-	arguments[2].unshift(module.id.match(/(?:.*\/)?/)[0]);
-	Object.defineProperty(arguments[1], '$'+module.id, {'get':function(){return exports;}});
-	arguments[3] = '('+arguments[3]+')();\n//# sourceURL='+module.uri;
-	eval(arguments[3]);
-	
-	//var f = new Function('global', 'exports', 'require', source);
-	//f.call(this, );
-	
-	// NOTE Store module code in the cache if the loaded file is a bundle
-	if (typeof module.id !== 'string')
-		for (id in module)
-			arguments[1]['$'+require.resolve(id).id] = module[id];
-	arguments[2].shift();
-	setTimeout(function(){ module._callback && module._callback(exports); }, 0);
-}
-*/
-);
+
+})();
 
