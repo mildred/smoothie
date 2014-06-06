@@ -104,13 +104,14 @@ function require(identifier, callback) {
 
 	var descriptor = resolve(identifier);
 	var cacheid = '$'+descriptor.id;
+	descriptor._callback = callback;
+	descriptor._require  = require;
 
 	if (cache[cacheid]) {
 		if (typeof cache[cacheid] === 'string')
 			load(descriptor, cache, pwd, cache[cacheid]);
 		// NOTE The callback should always be called asynchronously to ensure
 		//      that a cached call won't differ from an uncached one.
-		callback && setTimeout(function(){callback(cache[cacheid])}, 0);
 		return cache[cacheid];
 	}
 
@@ -144,9 +145,9 @@ function require(identifier, callback) {
 			callback && setTimeout(onLoad, 0);
 			return;
 		}
-		if (!cache[cacheid])
+		if (!cache[cacheid]) {
 			load(descriptor, cache, pwd, 'function(){\n'+request.responseText+'\n}');
-		callback && callback(cache[cacheid]);
+		}
 	}
 }
 
@@ -218,7 +219,19 @@ for (var i=0; i<paths.length; i++) {
 function /*load*/(module/*, cache, pwd, source*/) {
 	var global = window;
 	var exports = new Object();
-	Object.defineProperty(module, 'exports', {'get':function(){return exports;},'set':function(e){exports=e;}});
+	var require = function(mod, cb2){
+	  var cb = module._callback;
+	  module._callback = undefined;
+	  return module._require(mod, function(){
+	    module._callback = cb;
+	    setTimeout(function(){ module._callback && module._callback(exports); }, 0);
+	    return cb2.apply(this, arguments);
+	  });
+	}
+	Object.defineProperty(module, 'exports', {
+	  'get':function(){ return exports; },
+	  'set':function(e){ exports=e; }
+	});
 	arguments[2].unshift(module.id.match(/(?:.*\/)?/)[0]);
 	Object.defineProperty(arguments[1], '$'+module.id, {'get':function(){return exports;}});
 	// NOTE Firebug ignores the sourceUrl when the source is composed inside
@@ -230,6 +243,7 @@ function /*load*/(module/*, cache, pwd, source*/) {
 		for (id in module)
 			arguments[1]['$'+require.resolve(id).id] = module[id].toString();
 	arguments[2].shift();
+	setTimeout(function(){ module._callback && module._callback(exports); }, 0);
 }
 
 );
