@@ -273,20 +273,20 @@ function load(module, source, callback, callbackstack, parent_frame) {
 	if(typeof source === 'string') {
 	  // NOTE Firebug ignores the sourceUrl when the source is composed inside
 	  //      the eval call.
-	  /*
 	  var cacheid = '$' + module.id;
-	  source = 'require.cache[' + JSON.stringify(cacheid) + '] = function(global, module, exports){if(true){' + source + '} return {m:module, e:exports}; };'
+	  source = 'require.cache[' + JSON.stringify(cacheid) + '] = function(global, module, exports){if(true){' + source + '} return {m:module, e:exports}; }; console.log("dynamically loaded ' + cacheid + '");'
     source += '\n//# sourceURL='+module.uri
     addCode(source);
-    var res = cache[cacheid](global, module, exports);
-    module = res.m;
-    exports = res.e;
-    */
+    //var res = cache[cacheid](global, module, exports);
+    //module = res.m;
+    //exports = res.e;
+    /*
     var f = new Function('global', 'module', 'exports', source);
     source = function(){
       return f(global, module, exports);
     }
     source();
+    */
   } else {
   	source();
   }
